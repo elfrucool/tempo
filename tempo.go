@@ -13,8 +13,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-const tempoAPI = "https://api.tempo.io/core/3"
-const tempoDateLayout = "2006-01-02"
+const tempoAPI = "https://api.tempo.io/4"
+const tempoDateLayout = time.RFC3339
 
 // TempoClient for tempo API defined in https://apidocs.tempo.io/
 type TempoClient struct {
@@ -73,15 +73,13 @@ func (c *TempoClient) LogDay(date time.Time, hours int, jiraIssueKey string) err
 	loggedSeconds := hours * 60 * 60
 
 	w := NewWorklog{
-		IssueKey:                 jiraIssueKey,
-		TimeSpentSeconds:         loggedSeconds,
-		BillableSeconds:          loggedSeconds,
-		StartDate:                date.Format(tempoDateLayout),
-		StartTime:                "00:00:00",
-		Description:              fmt.Sprintf("Working on issue %s.", jiraIssueKey),
-		AuthorAccountID:          c.jiraAccountID,
-		RemainingEstimateSeconds: 0,
-		Attributes:               nil,
+		IssueKey:         jiraIssueKey,
+		TimeSpentSeconds: loggedSeconds,
+		BillableSeconds:  loggedSeconds,
+		StartDate:        date.Format(tempoDateLayout),
+		Description:      fmt.Sprintf("Working on issue %s.", jiraIssueKey),
+		AuthorAccountID:  c.jiraAccountID,
+		Attributes:       nil,
 	}
 
 	body, err := json.Marshal(w)
@@ -93,34 +91,62 @@ func (c *TempoClient) LogDay(date time.Time, hours int, jiraIssueKey string) err
 }
 
 func (c *TempoClient) GetLoggedHours(jiraIssueKey string) (int, error) {
-	endpoint := fmt.Sprintf("/worklogs?issue=%s", jiraIssueKey)
-	res, err := c.Do("GET", endpoint, nil)
+	searchBody := map[string]interface{}{
+		"from":  "1970-01-01",
+		"to":    "2100-12-31",
+		"issue": []string{jiraIssueKey},
+	}
+
+	body, err := json.Marshal(searchBody)
+	if err != nil {
+		return 0, fmt.Errorf("while marshalling search body: %v", err)
+	}
+
+	res, err := c.Do("POST", "/worklogs/search", bytes.NewReader(body))
+	if err != nil {
+		return 0, fmt.Errorf("while searching worklogs: %v", err)
+	}
+
+	defer res.Body.Close()
+
+	bodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return 0, err
 	}
 
+	if debug {
+		fmt.Printf("------ Tempo response body: \n%s\n", string(bodyBytes))
+	}
+
+	// Create a new reader from the bytes for json decoding
+	bodyReader := bytes.NewReader(bodyBytes)
+
 	var worklogs WorklogsRes
-	dec := json.NewDecoder(res.Body)
-	if err := dec.Decode(&worklogs); err != nil {
+	if err := json.NewDecoder(bodyReader).Decode(&worklogs); err != nil {
 		return 0, err
 	}
-	loggedSeconds := 0
-	for _, worklog := range worklogs.Results {
-		loggedSeconds += worklog.BillableSeconds
+
+	// var worklogs WorklogsRes
+	// if err := json.NewDecoder(res.Body).Decode(&worklogs); err != nil {
+	// 	return 0, err
+	// }
+
+	totalSeconds := 0
+	for _, w := range worklogs.Results {
+		totalSeconds += w.TimeSpentSeconds
 	}
-	return loggedSeconds / 60 / 60, nil
+
+	return totalSeconds / 3600, nil
 }
 
 type NewWorklog struct {
-	IssueKey                 string `json:"issueKey"`
-	TimeSpentSeconds         int    `json:"timeSpentSeconds"`
-	BillableSeconds          int    `json:"billableSeconds"`
-	StartDate                string `json:"startDate"`
-	StartTime                string `json:"startTime"`
-	Description              string `json:"description"`
-	AuthorAccountID          string `json:"authorAccountId"`
-	RemainingEstimateSeconds int    `json:"remainingEstimateSeconds"`
-	Attributes               []struct {
+	IssueKey         string `json:"issueKey"`
+	TimeSpentSeconds int    `json:"timeSpentSeconds"`
+	BillableSeconds  int    `json:"billableSeconds"`
+	StartDate        string `json:"startDate"`
+	Description      string `json:"description"`
+	AuthorAccountID  string `json:"authorAccountId"`
+	Attributes       []struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
 	} `json:"attributes,omitempty"`
@@ -129,36 +155,34 @@ type NewWorklog struct {
 type Worklog struct {
 	Self           string `json:"self"`
 	TempoWorklogID int    `json:"tempoWorklogId"`
-	JiraWorklogID  int    `json:"jiraWorklogId"`
 	Issue          struct {
 		Self string `json:"self"`
-		Key  string `json:"key"`
 		ID   int    `json:"id"`
 	} `json:"issue"`
 	TimeSpentSeconds int       `json:"timeSpentSeconds"`
 	BillableSeconds  int       `json:"billableSeconds"`
 	StartDate        string    `json:"startDate"`
-	StartTime        string    `json:"startTime"`
 	Description      string    `json:"description"`
 	CreatedAt        time.Time `json:"createdAt"`
 	UpdatedAt        time.Time `json:"updatedAt"`
 	Author           struct {
-		Self        string `json:"self"`
-		AccountID   string `json:"accountId"`
-		DisplayName string `json:"displayName"`
+		AccountID string `json:"accountId"`
+		Self      string `json:"self"`
 	} `json:"author"`
 	Attributes struct {
-		Self   string        `json:"self"`
-		Values []interface{} `json:"values"`
+		Self   string `json:"self"`
+		Values []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"values"`
 	} `json:"attributes"`
 }
 
 type WorklogsRes struct {
-	Self     string `json:"self"`
+	Results  []Worklog `json:"results"`
 	Metadata struct {
 		Count  int `json:"count"`
 		Offset int `json:"offset"`
 		Limit  int `json:"limit"`
 	} `json:"metadata"`
-	Results []Worklog `json:"results"`
 }

@@ -48,11 +48,11 @@ func (t *Timesheet) Log(date time.Time, hours int) error {
 func (t *Timesheet) See(date time.Time) error {
 	issue, err := t.jira.FindIssue(t.jira.MyUser.EmailAddress, date)
 	if err != nil {
-		return err
+		return fmt.Errorf("while finding issue for %s %s: %v", date.Weekday(), date, err)
 	}
 	hours, err := t.tempo.GetLoggedHours(issue.Key)
 	if err != nil {
-		return err
+		return fmt.Errorf("while getting logged hours for issue %s, weekday %s dat %s: %v", issue.Key, date.Weekday(), date, err)
 	}
 	t.printDetail(date, issue, hours)
 	return nil
