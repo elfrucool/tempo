@@ -14,7 +14,7 @@ import (
 )
 
 const tempoAPI = "https://api.tempo.io/4"
-const tempoDateLayout = time.RFC3339
+const tempoDateLayout = time.DateOnly
 
 // TempoClient for tempo API defined in https://apidocs.tempo.io/
 type TempoClient struct {
@@ -69,15 +69,15 @@ func (c *TempoClient) Do(method, resource string, body io.Reader) (*http.Respons
 	return res, nil
 }
 
-func (c *TempoClient) LogDay(date time.Time, hours int, jiraIssueKey string) error {
+func (c *TempoClient) LogDay(date time.Time, hours int, jiraIssueID uint64, jiraIssueKey string) error {
 	loggedSeconds := hours * 60 * 60
 
 	w := NewWorklog{
-		IssueKey:         jiraIssueKey,
+		IssueId:          jiraIssueID,
 		TimeSpentSeconds: loggedSeconds,
 		BillableSeconds:  loggedSeconds,
 		StartDate:        date.Format(tempoDateLayout),
-		Description:      fmt.Sprintf("Working on issue %s.", jiraIssueKey),
+		Description:      fmt.Sprintf("Working on issue %d (%s)", jiraIssueID, jiraIssueKey),
 		AuthorAccountID:  c.jiraAccountID,
 		Attributes:       nil,
 	}
@@ -90,11 +90,11 @@ func (c *TempoClient) LogDay(date time.Time, hours int, jiraIssueKey string) err
 	return err
 }
 
-func (c *TempoClient) GetLoggedHours(jiraIssueKey string) (int, error) {
+func (c *TempoClient) GetLoggedHours(jiraIssueID uint64) (int, error) {
 	searchBody := map[string]interface{}{
-		"from":  "1970-01-01",
-		"to":    "2100-12-31",
-		"issue": []string{jiraIssueKey},
+		"from":     "1970-01-01",
+		"to":       "2100-12-31",
+		"issueIds": []uint64{jiraIssueID},
 	}
 
 	body, err := json.Marshal(searchBody)
@@ -140,7 +140,7 @@ func (c *TempoClient) GetLoggedHours(jiraIssueKey string) (int, error) {
 }
 
 type NewWorklog struct {
-	IssueKey         string `json:"issueKey"`
+	IssueId          uint64 `json:"issueId"`
 	TimeSpentSeconds int    `json:"timeSpentSeconds"`
 	BillableSeconds  int    `json:"billableSeconds"`
 	StartDate        string `json:"startDate"`

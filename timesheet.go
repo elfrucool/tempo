@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,11 +38,17 @@ func NewTimesheet(ctx *cli.Context) Timesheet {
 func (t *Timesheet) Log(date time.Time, hours int) error {
 	issue, err := t.jira.CreateIssue(date)
 	if err != nil {
-		return err
+		return fmt.Errorf("while creating issue for %s %s: %v", date.Weekday(), date, err)
 	}
 	t.printDetail(date, issue, hours)
-	if err := t.tempo.LogDay(date, hours, issue.Key); err != nil {
-		return err
+
+	issueID, err := strconv.ParseUint(issue.ID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("while parsing JIRA issue ID as number: %s: %v", issue.ID, err)
+	}
+
+	if err := t.tempo.LogDay(date, hours, issueID, issue.Key); err != nil {
+		return fmt.Errorf("while logging hours for issue %s, weekday %s dat %s: %v", issue.Key, date.Weekday(), date, err)
 	}
 	return nil
 }
@@ -50,7 +58,17 @@ func (t *Timesheet) See(date time.Time) error {
 	if err != nil {
 		return fmt.Errorf("while finding issue for %s %s: %v", date.Weekday(), date, err)
 	}
-	hours, err := t.tempo.GetLoggedHours(issue.Key)
+	if debug {
+		b, _ := json.MarshalIndent(issue, "", "  ")
+		fmt.Printf("--- Issue: %s\n%s\n", issue.Key, string(b))
+	}
+
+	issueID, err := strconv.ParseUint(issue.ID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("while parsing JIRA issue ID as number: %s: %v", issue.ID, err)
+	}
+
+	hours, err := t.tempo.GetLoggedHours(issueID)
 	if err != nil {
 		return fmt.Errorf("while getting logged hours for issue %s, weekday %s dat %s: %v", issue.Key, date.Weekday(), date, err)
 	}
